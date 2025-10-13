@@ -1,0 +1,93 @@
+name: Build agents
+
+on:
+  schedule:
+    - cron:  '44 21 */2 * *'
+  workflow_dispatch:
+    inputs:
+      force_build:
+        description: 'Force build'
+        required: true
+        default: 'no'
+        type: choice
+        options:
+          - "no"
+          - "yes"
+
+env:
+  ORIGINAL_REPO: joohoi/acme-dns
+
+
+jobs:
+  check:
+    name: check for new release
+    runs-on: ubuntu-latest
+    outputs:
+      last-release-name: ${{ steps.release.outputs.last-release-name }}
+      last-release-date: ${{ steps.release.outputs.last-release-date }}
+      previous-release-date: ${{ steps.previous.outputs.previous-release-date }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: When was the last release?
+        id: release
+        run: |
+            REPO=$ORIGINAL_REPO
+            LAST_RELEASE=$(curl -s https://api.github.com/repos/$REPO/releases | jq -r '.[0]')
+            LAST_RELEASE_NAME=$(echo $LAST_RELEASE | jq -r '.name')
+            LAST_RELEASE_DATE=$(echo $LAST_RELEASE | jq -r '.published_at')
+
+            echo "last-release-name=$LAST_RELEASE_NAME" >> $GITHUB_OUTPUT
+            echo "last-release-date=$LAST_RELEASE_DATE" >> $GITHUB_OUTPUT
+
+      - name: make previous last-release-date available
+        id: previous
+        env:
+          PREV: ${{ secrets.LAST_RELEASE_DATE }}
+        run: |
+            echo "previous-release-date=$PREV" >> $GITHUB_OUTPUT
+
+  build:
+    needs: check
+    if: needs.check.outputs.last-release-date != needs.check.outputs.previous-release-date || github.event.inputs.force_build == 'yes'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Clone Repository
+        uses: actions/checkout@v5
+        with:
+          repository: $ORIGINAL_REPO
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to DockerHub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64, linux/arm/v6, linux/arm/v7, linux/arm64/v8
+          push: true
+          tags: glopix/acme-dns-multiarch:latest
+
+      - name: Docker Hub Description
+        uses: peter-evans/dockerhub-description@v5
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          short-description: ${{ github.event.repository.description }}
+
+      # use secrets of this repo for persistant storage between worklows
+      - name: Set new last release date as secret
+        uses: texas-mcallen-mission/actions-secret-modifier@v2.0.4.2
+        with:
+         name: 'LAST_RELEASE_DATE'
+         value: ${{ needs.check.outputs.last-release-date }}
+         token: ${{ secrets.REPO_ACCESS_TOKEN }}
+
