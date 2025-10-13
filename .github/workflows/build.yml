@@ -14,10 +14,6 @@ on:
           - "no"
           - "yes"
 
-env:
-  ORIGINAL_REPO: joohoi/acme-dns
-
-
 jobs:
   check:
     name: check for new release
@@ -34,7 +30,7 @@ jobs:
       - name: When was the last release?
         id: release
         run: |
-            REPO=$ORIGINAL_REPO
+            REPO='joohoi/acme-dns'
             LAST_RELEASE=$(curl -s https://api.github.com/repos/$REPO/releases | jq -r '.[0]')
             LAST_RELEASE_NAME=$(echo $LAST_RELEASE | jq -r '.name')
             LAST_RELEASE_DATE=$(echo $LAST_RELEASE | jq -r '.published_at')
@@ -57,7 +53,7 @@ jobs:
       - name: Clone Repository
         uses: actions/checkout@v5
         with:
-          repository: $ORIGINAL_REPO
+          repository: joohoi/acme-dns
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
