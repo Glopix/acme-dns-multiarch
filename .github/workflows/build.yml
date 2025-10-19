@@ -7,7 +7,7 @@ on:
     inputs:
       force_build:
         description: 'Force build'
-        required: true
+        required: false
         default: 'no'
         type: choice
         options:
@@ -16,39 +16,68 @@ on:
 
 jobs:
   check:
-    name: check for new release
+    name: Check for new acme-dns release
     runs-on: ubuntu-latest
     outputs:
       last-release-name: ${{ steps.release.outputs.last-release-name }}
       last-release-date: ${{ steps.release.outputs.last-release-date }}
-      previous-release-date: ${{ steps.previous.outputs.previous-release-date }}
+      saved-release-date: ${{ steps.saved.outputs.saved-release-date }}
+      saved-image-build-date: ${{ steps.saved.outputs.saved-image-build-date }}
+      days-since-last-image-build: ${{ steps.release.outputs.days-since-last-image-build }}
+
+    permissions:
+      contents: write
 
     steps:
-      - name: Checkout
+      - name: Checkout workflow branch
         uses: actions/checkout@v5
+        with:
+          ref: gh-workflows
 
-      - name: When was the last release?
-        id: release
+      - id: saved
+        name: Read previously saved release and image build date
         run: |
-            REPO='joohoi/acme-dns'
-            LAST_RELEASE=$(curl -s https://api.github.com/repos/$REPO/releases | jq -r '.[0]')
-            LAST_RELEASE_NAME=$(echo $LAST_RELEASE | jq -r '.name')
-            LAST_RELEASE_DATE=$(echo $LAST_RELEASE | jq -r '.published_at')
+          if [ -f "./gh-workflow_release-date.txt" ]; then
+            SAVED_RELEASE_DATE=$(cat ./gh-workflow_release-date.txt)
+          else
+            SAVED_RELEASE_DATE="none"
+          fi
+          echo "saved-release-date=$SAVED_RELEASE_DATE" >> "$GITHUB_OUTPUT"
 
-            echo "last-release-name=$LAST_RELEASE_NAME" >> $GITHUB_OUTPUT
-            echo "last-release-date=$LAST_RELEASE_DATE" >> $GITHUB_OUTPUT
+          if [ -f "./gh-workflow_image-build-date.txt" ]; then
+            SAVED_IMAGE_BUILD_DATE=$(cat ./gh-workflow_image-build-date.txt)
+          else
+            SAVED_IMAGE_BUILD_DATE="none"
+          fi
+          echo "saved-image-build-date=$SAVED_IMAGE_BUILD_DATE" >> "$GITHUB_OUTPUT"
+          echo "SAVED_IMAGE_BUILD_DATE=$SAVED_IMAGE_BUILD_DATE" >> "$GITHUB_ENV"
 
-      - name: make previous last-release-date available
-        id: previous
-        env:
-          PREV: ${{ secrets.LAST_RELEASE_DATE }}
+      - id: release
+        name: Fetch latest release info
         run: |
-            echo "previous-release-date=$PREV" >> $GITHUB_OUTPUT
+          REPO="joohoi/acme-dns"
+          RELEASE_JSON=$(curl -s "https://api.github.com/repos/$REPO/releases/latest")
+
+          LAST_RELEASE_NAME=$(jq -r '.name' <<< "$RELEASE_JSON")
+          LAST_RELEASE_DATE=$(jq -r '.published_at' <<< "$RELEASE_JSON")
+
+          echo "last-release-name=$LAST_RELEASE_NAME" >> "$GITHUB_OUTPUT"
+          echo "last-release-date=$LAST_RELEASE_DATE" >> "$GITHUB_OUTPUT"
+
+      - id: days-since-build
+        name: get number of days since last image build
+        run: |
+          DAYS_SINCE_LAST_IMAGE_BUILD=$(( ( $(date +%s) - $(date -d "$SAVED_IMAGE_BUILD_DATE" +%s) )/(60*60*24) ))
+          echo "days-since-last-image-build=$DAYS_SINCE_LAST_IMAGE_BUILD" >> "$GITHUB_OUTPUT"
 
   build:
+    name: Build job
     needs: check
-    if: needs.check.outputs.last-release-date != needs.check.outputs.previous-release-date || github.event.inputs.force_build == 'yes'
     runs-on: ubuntu-latest
+    if: |
+      needs.check.outputs.last-release-date != needs.check.outputs.saved-release-date ||
+      needs.check.outputs.days-since-last-image-build > 30 ||
+      github.event.inputs.force_build == 'yes'
     steps:
       - name: Clone Repository
         uses: actions/checkout@v5
@@ -70,7 +99,7 @@ jobs:
           context: .
           platforms: linux/amd64, linux/arm/v6, linux/arm/v7, linux/arm64/v8
           push: true
-          tags: glopix/acme-dns-multiarch:latest
+          tags: glopix/acme-dns-multiarch:latest, glopix/acme-dns-multiarch:${{ needs.check.outputs.last-release-name }}
 
       - name: Docker Hub Description
         uses: peter-evans/dockerhub-description@v5
@@ -79,11 +108,19 @@ jobs:
           password: ${{ secrets.DOCKERHUB_TOKEN }}
           short-description: ${{ github.event.repository.description }}
 
-      # use secrets of this repo for persistant storage between worklows
-      - name: Set new last release date as secret
-        uses: texas-mcallen-mission/actions-secret-modifier@v2.0.4.2
-        with:
-         name: 'LAST_RELEASE_DATE'
-         value: ${{ needs.check.outputs.last-release-date }}
-         token: ${{ secrets.REPO_ACCESS_TOKEN }}
+      - name: save last image build date and release date to files
+        run: |
+            TODAY=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+            echo "$TODAY" > ./gh-workflow_image-build-date.txt
+            echo "${{ needs.check.outputs.last-release-date }}" > ./gh-workflow_release-date.txt
 
+      - name: Commit updated release data
+        uses: stefanzweifel/git-auto-commit-action@v7
+        with:
+          branch: gh-workflows
+          file_pattern: 'gh-workflow_*.txt'
+          commit_message: "Update stored release info"
+          commit_user_name: GitHub Actions Bot
+          commit_user_email: github-actions-bot@none.dom
+          commit_author: GitHub Actions Bot <github-actions-bot@none.dom>
+          create_branch: true
