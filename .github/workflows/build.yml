@@ -25,9 +25,6 @@ jobs:
       saved-image-build-date: ${{ steps.saved.outputs.saved-image-build-date }}
       days-since-last-image-build: ${{ steps.release.outputs.days-since-last-image-build }}
 
-    permissions:
-      contents: write
-
     steps:
       - name: Checkout workflow branch
         uses: actions/checkout@v5
