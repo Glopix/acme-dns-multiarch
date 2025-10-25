@@ -111,7 +111,7 @@ jobs:
     name: save build info
     needs: [check, build]
     runs-on: ubuntu-latest
-    if: needs.build.conclusion == 'success'
+    if: needs.build.result == 'success' && needs.build.result != 'skipped'
     permissions:
       # Give the default GITHUB_TOKEN write permission to commit and push the
       # added or changed files to the repository.
