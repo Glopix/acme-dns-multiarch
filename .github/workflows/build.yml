@@ -1,8 +1,11 @@
-name: Build agents
+name: Build multiarch container images
 
 on:
   schedule:
     - cron:  '44 21 */2 * *'
+  push:
+    branches:
+      - 'master'
   workflow_dispatch:
     inputs:
       force_build:
