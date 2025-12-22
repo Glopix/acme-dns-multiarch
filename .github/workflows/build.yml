@@ -26,7 +26,7 @@ jobs:
       last-release-date: ${{ steps.release.outputs.last-release-date }}
       saved-release-date: ${{ steps.saved.outputs.saved-release-date }}
       saved-image-build-date: ${{ steps.saved.outputs.saved-image-build-date }}
-      days-since-last-image-build: ${{ steps.release.outputs.days-since-last-image-build }}
+      days-since-last-image-build: ${{ steps.days-since-build.outputs.days-since-last-image-build }}
 
     steps:
       - name: Checkout workflow branch
